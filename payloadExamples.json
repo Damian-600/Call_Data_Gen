@@ -1,0 +1,84 @@
+[
+  {
+    "assetType": "Multitenant",
+    "sbcName": "DEV-CE-IRL-TEAMS01",
+    "serviceType": "Teams",
+    "ipGroupNames": ["Teams_EMEAMT11"],
+    "quality": "good"
+  },
+  {
+    "assetType": "Multitenant",
+    "sbcName": "DEV-CE-LND-TEAMS01",
+    "serviceType": "Teams",
+    "ipGroupNames": ["Teams_EMEAMT11"],
+    "quality": "good"
+  },
+  {
+    "assetType": "Multitenant",
+    "sbcName": "DEV-CE-IRL-OC01",
+    "serviceType": "Teams_OC",
+    "ipGroupNames": ["9b39a2e9-3c02-4287-b125-782ee59eef2c"],
+    "quality": "good"
+  },
+  {
+    "assetType": "Multitenant",
+    "sbcName": "DEV-CE-LND-OC01",
+    "serviceType": "Teams_OC",
+    "ipGroupNames": ["9b39a2e9-3c02-4287-b125-782ee59eef2c"],
+    "quality": "good"
+  },
+  {
+    "assetType": "Multitenant",
+    "sbcName": "DEV-CE-IRL-WEBEX01",
+    "serviceType": "Webex_CCP",
+    "ipGroupNames": ["d8765eee-2af5-458e-873d-dc39d6f9c6c6"],
+    "quality": "good"
+  },
+  {
+    "assetType": "Multitenant",
+    "sbcName": "DEV-CE-LND-WEBEX01",
+    "serviceType": "Webex_CCP",
+    "ipGroupNames": ["d8765eee-2af5-458e-873d-dc39d6f9c6c6"],
+    "quality": "good"
+  },
+  {
+    "assetType": "Multitenant",
+    "sbcName": "dev-ce-irl-zoom01",
+    "serviceType": "Zoom Phone",
+    "ipGroupNames": ["GUCX_DEV"],
+    "quality": "medium"
+  },
+  {
+    "assetType": "Multitenant",
+    "sbcName": "dev-ce-lnd-zoom01",
+    "serviceType": "Zoom Phone",
+    "ipGroupNames": ["GUCX_DEV"],
+    "quality": "medium"
+  },
+  {
+    "assetType": "Multitenant",
+    "sbcName": "DEV-CE-IRL-ACS01",
+    "serviceType": "ACS",
+    "ipGroupNames": ["acstesting01"],
+    "quality": "poor"
+  },
+  {
+    "assetType": "Multitenant",
+    "sbcName": "DEV-CE-LND-ACS01",
+    "serviceType": "ACS",
+    "ipGroupNames": ["acstesting01"],
+    "quality": "poor"
+  },
+  {
+    "assetType": "Dedicated",
+    "sbcName": "GAM-INTEROP-TESTING-IRL-SBC01",
+    "ipGroupNames": ["GAM-082", "WBX-084", "TMS-102"],
+    "quality": "good"
+  },
+  {
+    "assetType": "Dedicated",
+    "sbcName": "GAM-INTEROP-TESTING-LND-SBC01",
+    "ipGroupNames": ["GAM-082", "WBX-084", "TMS-102"],
+    "quality": "good"
+  }
+]
