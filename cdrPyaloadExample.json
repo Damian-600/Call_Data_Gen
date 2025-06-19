@@ -1,0 +1,21 @@
+{
+  "noCallsPerInterval": 35,
+  "sbcNames": ["GAM-INTEROP-TESTING-IRL-SBC01", "GAM-INTEROP-TESTING-LND-SBC01"],
+  "services": [
+    {
+      "ipGroup": "TMS-102",
+      "numberRangeFrom": 441416408000,
+      "numberRangeTo": 441416408499
+    },
+    {
+      "ipGroup": "WBX-084",
+      "numberRangeFrom": 441416408500,
+      "numberRangeTo": 441416408799
+    }
+  ],
+  "pstn": {
+    "ipGroup": "GAM-082",
+    "numberRangeFrom": 441383667699,
+    "numberRangeTo": 441383667999
+  }
+}

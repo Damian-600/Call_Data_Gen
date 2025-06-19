@@ -4,7 +4,7 @@ import { randomBytes as randomBytesCb, randomUUID } from "node:crypto";
 import catchAsync from "../../utils/v1/catchAsync.mjs";
 import AppError from "../../utils/v1/appError.mjs";
 
-import { object, string, array } from "yup";
+import { object, string, array, number } from "yup";
 
 import { postKpisToPipeline } from "../../utils/v1/dataPrepper.mjs";
 
@@ -74,7 +74,7 @@ export const generateKpiData = catchAsync(async (req, res, next) => {
     currentInterval += timeIncrementsMs;
   }
 
-  // Looping over 15 sec intervals and submititng data in bulk for each asset type
+  // Looping over 15 sec intervals and submititng data
   for (const _interval of intervals) {
     console.log(`Processing interval ${new Date(_interval)}`);
 
@@ -139,7 +139,11 @@ export const generateKpiData = catchAsync(async (req, res, next) => {
             }),
           };
 
-          const postToPipelineOutcome = await postKpisToPipeline(process.env.dataPrepperAuth, body);
+          const postToPipelineOutcome = await postKpisToPipeline(
+            process.env.dataPrepperAuth,
+            body,
+            "kip"
+          );
 
           if (postToPipelineOutcome.statusCode !== 200) {
             console.log(
@@ -159,9 +163,50 @@ export const generateKpiData = catchAsync(async (req, res, next) => {
 export const generateCdrData = catchAsync(async (req, res, next) => {
   const cdrData = req.body;
 
+  /*
+    Input validatation, schema must be correct to ensure data consisitency in OpenSearch mapping
+  */
+
+  // validate schema of the supplied body
+  const assetSchema = object({
+    noCallsPerInterval: number().required().min(1, "Value must be greater than 0"),
+    sbcNames: array().required().min(1, "At least 1 SBC name must be provided"),
+    services: array(
+      object({
+        ipGroup: string().required(),
+        numberRangeFrom: number().required(),
+        numberRangeTo: number().required(),
+      })
+    )
+      .min(1)
+      .required()
+      .min(1),
+    pstn: object({
+      ipGroup: string().required(),
+      numberRangeFrom: number().required(),
+      numberRangeTo: number().required(),
+    }).required(),
+  });
+
+  try {
+    await assetSchema.validate(cdrData);
+  } catch (err) {
+    return next(
+      new AppError(
+        `ERROR: Supplied body has incorrect format: ERR - ${err.errors}`,
+        500,
+        `ERROR: Supplied body has incorrect format: ERR - ${err.errors}`
+      )
+    );
+  }
+
   // Random number generation functions
   const randomInteger = (min, max) => {
     return Math.floor(Math.random() * (max - min + 1)) + min;
+  };
+
+  const randomDecimalInteger = (min, max, decimalPlaces) => {
+    return (Math.random() * (max - min) + min).toFixed(decimalPlaces) * 1;
   };
 
   const callDirections = ["ingress", "egress"];
@@ -191,12 +236,13 @@ export const generateCdrData = catchAsync(async (req, res, next) => {
     const currentTimeInteval = Date.now();
     const callDirection = callDirections[randomInteger(0, callDirections.length - 1)];
     const callDuration = randomInteger(3000, 36000);
-    console.log(callDirection);
+    const callConnectObj = new Date(currentTimeInteval);
+    const callReleaseObj = new Date(currentTimeInteval + callDuration * 10);
 
     const directionBaseData = {};
 
     switch (callDirection) {
-      case "ingress":
+      case "ingress": {
         const dstServiceIndex = randomInteger(0, data.services.length - 1);
 
         directionBaseData.ingressIpGroupName = data.pstn.ipGroup;
@@ -215,37 +261,118 @@ export const generateCdrData = catchAsync(async (req, res, next) => {
         )}`;
         directionBaseData.calledUserAfterManipulation =
           directionBaseData.calledUserBeforeManipulation;
+        directionBaseData.ingressLocalRtpIp = "10.0.11.175";
+        directionBaseData.ingressRemoteRtpIp = "88.215.55.12";
+        directionBaseData.egressLocalRtpIp = "10.0.11.175";
+        directionBaseData.egressRemoteRtpIp = "52.112.239.12";
+        directionBaseData.ingressCallSourceIp = "88.215.55.11";
+        directionBaseData.egressCallDestIp = "52.114.76.76";
+        directionBaseData.setupTime = `${callConnectObj.getUTCHours()}:${callConnectObj.getUTCMinutes()}:${callConnectObj.getUTCSeconds()}.${callConnectObj.getUTCMilliseconds()}  UTC ${callConnectObj.toLocaleDateString(
+          "en-GB",
+          {
+            weekday: "short",
+          }
+        )} ${callConnectObj.toLocaleDateString("en-GB", {
+          month: "short",
+        })} ${callConnectObj.toLocaleDateString("en-GB", {
+          day: "numeric",
+        })} ${callConnectObj.toLocaleDateString("en-GB", {
+          year: "numeric",
+        })}`;
+        directionBaseData.connectTimeUTC = `${callConnectObj.getUTCHours()}:${callConnectObj.getUTCMinutes()}:${callConnectObj.getUTCSeconds()}.${callConnectObj.getUTCMilliseconds()}  UTC ${callConnectObj.toLocaleDateString(
+          "en-GB",
+          {
+            weekday: "short",
+          }
+        )} ${callConnectObj.toLocaleDateString("en-GB", {
+          month: "short",
+        })} ${callConnectObj.toLocaleDateString("en-GB", {
+          day: "numeric",
+        })} ${callConnectObj.toLocaleDateString("en-GB", {
+          year: "numeric",
+        })}`;
+        directionBaseData.releaseTimeUTC = `${callReleaseObj.getUTCHours()}:${callReleaseObj.getUTCMinutes()}:${callReleaseObj.getUTCSeconds()}.${callReleaseObj.getUTCMilliseconds()}  UTC ${callReleaseObj.toLocaleDateString(
+          "en-GB",
+          {
+            weekday: "short",
+          }
+        )} ${callReleaseObj.toLocaleDateString("en-GB", {
+          month: "short",
+        })} ${callReleaseObj.toLocaleDateString("en-GB", {
+          day: "numeric",
+        })} ${callReleaseObj.toLocaleDateString("en-GB", {
+          year: "numeric",
+        })}`;
+        break;
+      }
+      case "egress": {
+        const srcServiceIndex = randomInteger(0, data.services.length - 1);
 
+        directionBaseData.ingressIpGroupName = data.services[srcServiceIndex].ipGroup;
+        directionBaseData.egressIpGroupName = data.pstn.ipGroup;
+        directionBaseData.ingressSipInterfaceName = "TLS_SipInterface";
+        directionBaseData.egressSipInterfaceName = "UDP_SipInterface";
+
+        directionBaseData.callingUserBeforeManipulation = `+${randomInteger(
+          data.services[srcServiceIndex].numberRangeFrom,
+          data.services[srcServiceIndex].numberRangeTo
+        )}`;
+        directionBaseData.callingUserAfterManipulation =
+          directionBaseData.callingUserBeforeManipulation;
+        directionBaseData.calledUserBeforeManipulation = `+${randomInteger(
+          data.pstn.numberRangeFrom,
+          data.pstn.numberRangeTo
+        )}`;
+        directionBaseData.calledUserAfterManipulation =
+          directionBaseData.calledUserBeforeManipulation;
+        directionBaseData.ingressLocalRtpIp = "10.0.11.175";
+        directionBaseData.ingressRemoteRtpIp = "52.112.239.12";
+        directionBaseData.egressLocalRtpIp = "10.0.11.175";
+        directionBaseData.egressRemoteRtpIp = "88.215.55.12";
+        directionBaseData.ingressCallSourceIp = "52.114.76.76";
+        directionBaseData.egressCallDestIp = "88.215.55.11";
+        directionBaseData.setupTime = `${callConnectObj.getUTCHours()}:${callConnectObj.getUTCMinutes()}:${callConnectObj.getUTCSeconds()}.${callConnectObj.getUTCMilliseconds()}  UTC ${callConnectObj.toLocaleDateString(
+          "en-GB",
+          {
+            weekday: "short",
+          }
+        )} ${callConnectObj.toLocaleDateString("en-GB", {
+          month: "short",
+        })} ${callConnectObj.toLocaleDateString("en-GB", {
+          day: "numeric",
+        })} ${callConnectObj.toLocaleDateString("en-GB", {
+          year: "numeric",
+        })}`;
+        directionBaseData.connectTimeUTC = `${callConnectObj.getUTCHours()}:${callConnectObj.getUTCMinutes()}:${callConnectObj.getUTCSeconds()}.${callConnectObj.getUTCMilliseconds()}  UTC ${callConnectObj.toLocaleDateString(
+          "en-GB",
+          {
+            weekday: "short",
+          }
+        )} ${callConnectObj.toLocaleDateString("en-GB", {
+          month: "short",
+        })} ${callConnectObj.toLocaleDateString("en-GB", {
+          day: "numeric",
+        })} ${callConnectObj.toLocaleDateString("en-GB", {
+          year: "numeric",
+        })}`;
+        directionBaseData.releaseTimeUTC = `${callReleaseObj.getUTCHours()}:${callReleaseObj.getUTCMinutes()}:${callReleaseObj.getUTCSeconds()}.${callReleaseObj.getUTCMilliseconds()}  UTC ${callReleaseObj.toLocaleDateString(
+          "en-GB",
+          {
+            weekday: "short",
+          }
+        )} ${callReleaseObj.toLocaleDateString("en-GB", {
+          month: "short",
+        })} ${callReleaseObj.toLocaleDateString("en-GB", {
+          day: "numeric",
+        })} ${callReleaseObj.toLocaleDateString("en-GB", {
+          year: "numeric",
+        })}`;
+
+        break;
+      }
       default:
         break;
     }
-
-    // const directionBaseDate =
-    //   callDirection === "ingress"
-    //     ? {
-    //         ingressIpGroupName: data.pstn.ipGroup,
-    //         ingressSipInterfaceName: "UDP_SipInterface",
-    //         egressSipInterfaceName: "TLS_SipInterface",
-    //         egressIpGroupName: data.services[randomInteger(0, data.services.length - 1)].ipGroup,
-    //         callingUserBeforeManipulation: `+${randomInteger(
-    //           data.pstn.numberRangeFrom,
-    //           data.pstn.numberRangeTo
-    //         )}`,
-    //         callingUserAfterManipulation: `+${randomInteger(
-    //           data.pstn.numberRangeFrom,
-    //           data.pstn.numberRangeTo
-    //         )}`,
-    //         calledUserBeforeManipulation:
-    //           data.services[
-    //             data.services.findIndex((_el) => _el.ipGroup === this.egressIpGroupName)
-    //           ].numberRangeFrom,
-    //       }
-    //     : {
-    //         ingressIpGroupName: data.services[randomInteger(0, data.services.length - 1)].ipGroup,
-    //         ingressSipInterfaceName: "TLS_SipInterface",
-    //         egressSipInterfaceName: "UDP_SipInterface",
-    //         egressIpGroupName: data.pstn.ipGroup,
-    //       };
 
     // Desctruct direction based data to be used as CDR values
     const {
@@ -257,17 +384,26 @@ export const generateCdrData = catchAsync(async (req, res, next) => {
       callingUserAfterManipulation,
       calledUserBeforeManipulation,
       calledUserAfterManipulation,
+      ingressLocalRtpIp,
+      ingressRemoteRtpIp,
+      egressLocalRtpIp,
+      egressRemoteRtpIp,
+      ingressCallSourceIp,
+      egressCallDestIp,
+      connectTimeUTC,
+      releaseTimeUTC,
+      setupTime,
     } = directionBaseData;
 
     return {
       recordType: "STOP",
       productName: data.sbcNames[randomInteger(0, data.sbcNames.length - 1)],
-      setupTime: "14:19:13.745  UTC Wed Jun 18 2025",
+      setupTime,
       globalSessionId: await generateRandomId(16),
       sessionId: await generateRandomId(12),
       isSuccess: "yes",
-      connectTimeUTC: new Date(currentTimeInteval),
-      releaseTimeUTC: new Date(currentTimeInteval + callDuration * 10),
+      connectTimeUTC,
+      releaseTimeUTC,
       timeToConnect: randomInteger(100, 300),
       callDuration: callDuration,
       timeZone: "UTC",
@@ -277,8 +413,8 @@ export const generateCdrData = catchAsync(async (req, res, next) => {
       calledUserAfterManipulation,
       ingressCallOrigin: "in",
       egressCallOrigin: "out",
-      ingressCallSourceIp: "88.215.55.11",
-      egressCallDestIp: "52.114.76.76",
+      ingressCallSourceIp,
+      egressCallDestIp,
       ingressTrmReason: "GWAPP_NORMAL_CALL_CLEAR",
       ingressCallId: randomUUID(),
       egressCallId: randomUUID(),
@@ -291,28 +427,28 @@ export const generateCdrData = catchAsync(async (req, res, next) => {
       ingressIpGroupName,
       egressSipInterfaceName,
       egressIpGroupName,
-      ingressLocalRtpIp: "10.0.11.175",
-      ingressLocalRtpPort: 6000,
-      ingressRemoteRtpIp: "88.215.55.12",
-      ingressRemoteRtpPort: 25312,
-      egressLocalRtpIp: "10.0.11.175",
-      egressLocalRtpPort: 6004,
-      egressRemoteRtpIp: "52.112.239.12",
-      egressRemoteRtpPort: 50286,
+      ingressLocalRtpIp,
+      ingressLocalRtpPort: randomInteger(6000, 65535),
+      ingressRemoteRtpIp,
+      ingressRemoteRtpPort: randomInteger(25000, 65535),
+      egressLocalRtpIp,
+      egressLocalRtpPort: randomInteger(6000, 65535),
+      egressRemoteRtpIp,
+      egressRemoteRtpPort: randomInteger(25000, 65535),
       ingressCodec: "g711Alaw64k",
       egressCodec: "g711Alaw64k",
-      ingressPacketLoss: 0,
-      egressPacketLoss: 0,
-      ingressLocalPacketLoss: 0, //
-      egressLocalPacketLoss: 0, //
-      ingressLocalJitter: 4, //
-      ingressRemoteJitter: 4294967295, //
-      egressLocalJitter: 7, //
-      egressRemoteJitter: 15, //
-      ingressLocalMos: 127, //
-      ingressRemoteMos: 127, //
-      egressLocalMos: 127, //
-      egressRemoteMos: 127, //
+      ingressPacketLoss: randomDecimalInteger(0, 1.5, 1),
+      egressPacketLoss: randomDecimalInteger(0, 1.5, 1),
+      ingressLocalPacketLoss: randomDecimalInteger(0, 1.5, 1),
+      egressLocalPacketLoss: randomDecimalInteger(0, 1.5, 1),
+      ingressLocalJitter: randomDecimalInteger(0, 15, 1),
+      ingressRemoteJitter: randomDecimalInteger(0, 15, 1),
+      egressLocalJitter: randomDecimalInteger(0, 15, 1),
+      egressRemoteJitter: randomDecimalInteger(0, 15, 1),
+      ingressLocalMos: randomDecimalInteger(40, 42),
+      ingressRemoteMos: randomDecimalInteger(40, 42),
+      egressLocalMos: randomDecimalInteger(40, 42),
+      egressRemoteMos: randomDecimalInteger(40, 42),
       ingressLocalRoudTripDelay: 0,
       ingressRemoteRoudTripDelay: 0,
       egressLocalRoudTripDelay: 0,
@@ -328,6 +464,56 @@ export const generateCdrData = catchAsync(async (req, res, next) => {
     };
   };
 
-  const cdrReord = await generateCdr(cdrData);
-  res.status(200).send(cdrReord);
+  // Date ranges from 00:00 to 23:59 of current date
+  const range = {
+    todayStart: new Date(new Date().setUTCHours(9, 0, 0, 0)).getTime(),
+    todayEnd: new Date(new Date().setUTCHours(17, 0, 0, 0)).getTime(),
+  };
+
+  /*
+    Setting intervals every 15 minutes and generating timestamps for each interval in milliscends
+    We wil use these timestamps as value when submitting data to OpenSearch
+  */
+
+  let currentInterval = range.todayStart;
+  const timeIncrementsMs = 900000;
+  const intervals = [];
+
+  while (currentInterval <= range.todayEnd) {
+    intervals.push(currentInterval);
+
+    currentInterval += timeIncrementsMs;
+  }
+
+  // Looping over 15 sec intervals and submititng data
+  for (const _interval of intervals) {
+    console.log(`Processing interval ${new Date(_interval)}`);
+
+    let i = 0;
+    while (i < cdrData.noCallsPerInterval) {
+      i += 1;
+
+      try {
+        const body = await generateCdr(cdrData);
+
+        const postToPipelineOutcome = await postKpisToPipeline(
+          process.env.dataPrepperAuth,
+          body,
+          "sbcCdr"
+        );
+
+        if (postToPipelineOutcome.statusCode !== 200) {
+          console.log(
+            `ERROR: Failed to poast cdr records to pipeline- ERR: ${JSON.stringify(
+              postToPipelineOutcome.body
+            )}`
+          );
+        }
+      } catch (error) {
+        console.log(error);
+      }
+    }
+  }
+
+  res.status(200).send(`CDR data generated and submitted to pipeline`);
 });

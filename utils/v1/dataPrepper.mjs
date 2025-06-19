@@ -1,7 +1,7 @@
 import https from "https";
 import axios from "axios";
 
-export const postKpisToPipeline = async (auth, data) => {
+export const postKpisToPipeline = async (auth, data, handler) => {
   try {
     const httpsAgent = new https.Agent({ rejectUnauthorized: false });
 
@@ -14,7 +14,7 @@ export const postKpisToPipeline = async (auth, data) => {
     };
 
     const response = await axios.post(
-      `https://${process.env.DATA_PREPPER_FQDN}/api/v1/kpi`,
+      `https://${process.env.DATA_PREPPER_FQDN}/api/v1/${handler}`,
       data,
       config
     );
