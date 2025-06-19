@@ -142,7 +142,7 @@ export const generateKpiData = catchAsync(async (req, res, next) => {
           const postToPipelineOutcome = await postKpisToPipeline(
             process.env.dataPrepperAuth,
             body,
-            "kip"
+            "kpi"
           );
 
           if (postToPipelineOutcome.statusCode !== 200) {
@@ -232,12 +232,11 @@ export const generateCdrData = catchAsync(async (req, res, next) => {
     }
   };
 
-  const generateCdr = async (data) => {
-    const currentTimeInteval = Date.now();
+  const generateCdr = async (data, intervalMs) => {
     const callDirection = callDirections[randomInteger(0, callDirections.length - 1)];
     const callDuration = randomInteger(3000, 36000);
-    const callConnectObj = new Date(currentTimeInteval);
-    const callReleaseObj = new Date(currentTimeInteval + callDuration * 10);
+    const callConnectObj = new Date(intervalMs);
+    const callReleaseObj = new Date(intervalMs + callDuration * 10);
 
     const directionBaseData = {};
 
@@ -494,7 +493,7 @@ export const generateCdrData = catchAsync(async (req, res, next) => {
       i += 1;
 
       try {
-        const body = await generateCdr(cdrData);
+        const body = await generateCdr(cdrData, _interval);
 
         const postToPipelineOutcome = await postKpisToPipeline(
           process.env.dataPrepperAuth,
