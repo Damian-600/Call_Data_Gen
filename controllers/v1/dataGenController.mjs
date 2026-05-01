@@ -10,6 +10,34 @@ import { object, string, array, number } from "yup";
 
 import { postKpisToPipeline } from "../../utils/v1/dataPrepper.mjs";
 
+// Utility function to split and reformat Multitenant assets
+export function splitAndFormatMtAssets(mtAssets) {
+  const result = [];
+  mtAssets.forEach((asset) => {
+    // Find all sbcName keys (e.g., sbcName1, sbcName2, ...)
+    Object.keys(asset)
+      .filter((key) => key.startsWith("sbcName"))
+      .forEach((sbcKey) => {
+        if (asset[sbcKey]) {
+          // Remove everything after the first '.' in the sbcName value
+          const sbcNameShort = asset[sbcKey].split(".")[0];
+
+          const ipGroupNamesParsed = asset.ipGroupNames.map((ipg) => {
+            if (asset.serviceType === "Teams") return `Teams_${ipg}`;
+            return ipg;
+          });
+          result.push({
+            assetType: asset.assetType,
+            sbcName: sbcNameShort,
+            serviceType: asset.serviceType,
+            ipGroupNames: ipGroupNamesParsed,
+          });
+        }
+      });
+  });
+  return result;
+}
+
 export const generateKpiDataAuto = catchAsync(async (req, res, next) => {
   let { dateFrom, dateTo, customerUuid } = req.body;
   if (dateFrom === undefined || dateTo === undefined || !customerUuid) {
@@ -44,6 +72,8 @@ export const generateKpiDataAuto = catchAsync(async (req, res, next) => {
       new AppError(`Error fetching Multitenant assets from database: ${mtAssets.message}`, 500),
     );
   }
+  const formattedMtAssets = splitAndFormatMtAssets(mtAssets);
+
   const dedicatedAssets = await getDedicatedAssets(customerUuid);
   if (dedicatedAssets instanceof Error) {
     return next(
@@ -55,7 +85,7 @@ export const generateKpiDataAuto = catchAsync(async (req, res, next) => {
   }
 
   // Merge and clean assets
-  let assets = [...mtAssets, ...dedicatedAssets]
+  let assets = [...formattedMtAssets, ...dedicatedAssets]
     .map((asset) => ({
       ...asset,
       ipGroupNames: Array.isArray(asset.ipGroupNames)
@@ -68,8 +98,8 @@ export const generateKpiDataAuto = catchAsync(async (req, res, next) => {
     return next(new AppError("No assets found for customer", 404));
   }
 
-  // Assign random quality to each asset
-  const qualities = ["poor", "medium", "good"];
+  // Assign random quality to each asset: "poor", "medium", "good"
+  const qualities = req.body.quality ? req.body.quality : ["poor", "medium", "good"];
   assets = assets.map((asset) => ({
     ...asset,
     quality: qualities[Math.floor(Math.random() * qualities.length)],

@@ -3,7 +3,7 @@ import sequelize from "../../sequelize.mjs";
 export const getMTassets = async (customerUuid) => {
   try {
     const results = await sequelize.query(
-      "SELECT 'Multitenant' AS assetType, m.moduleName AS sbcName, mt.moduleType AS serviceType, JSON_ARRAYAGG(t.tenant) AS ipGroupNames \
+      "SELECT 'Multitenant' AS assetType, sbc_fqdn1 as sbcName1, sbc_fqdn2 as sbcName2, mt.moduleType AS serviceType, JSON_ARRAYAGG(t.tenant) AS ipGroupNames \
       FROM (SELECT DISTINCT s.tenant, s.module_key, s.client_key FROM cucx_emea_db.services s) t \
       JOIN cucx_global_db.clients c \
        ON t.client_key = c.client_id \
@@ -59,69 +59,6 @@ export const getDedicatedAssets = async (customerUuid) => {
     return error;
   }
 };
-
-const multitenantAssets = [
-  {
-    assetType: "Multitenant",
-    sbcName: "DEV-CE-IRL-TEAMS01",
-    serviceType: "Teams",
-    ipGroupNames: ["Teams_EMEAMT11"],
-  },
-  {
-    assetType: "Multitenant",
-    sbcName: "DEV-CE-LND-TEAMS01",
-    serviceType: "Teams",
-    ipGroupNames: ["Teams_EMEAMT11"],
-  },
-  {
-    assetType: "Multitenant",
-    sbcName: "DEV-CE-IRL-OC01",
-    serviceType: "Teams_OC",
-    ipGroupNames: ["9b39a2e9-3c02-4287-b125-782ee59eef2c"],
-  },
-  {
-    assetType: "Multitenant",
-    sbcName: "DEV-CE-LND-OC01",
-    serviceType: "Teams_OC",
-    ipGroupNames: ["9b39a2e9-3c02-4287-b125-782ee59eef2c"],
-  },
-  {
-    assetType: "Multitenant",
-    sbcName: "DEV-CE-IRL-WEBEX01",
-    serviceType: "Webex_CCP",
-    ipGroupNames: ["d8765eee-2af5-458e-873d-dc39d6f9c6c6"],
-  },
-  {
-    assetType: "Multitenant",
-    sbcName: "DEV-CE-LND-WEBEX01",
-    serviceType: "Webex_CCP",
-    ipGroupNames: ["d8765eee-2af5-458e-873d-dc39d6f9c6c6"],
-  },
-  {
-    assetType: "Multitenant",
-    sbcName: "dev-ce-irl-zoom01",
-    serviceType: "Zoom Phone",
-    ipGroupNames: ["GUCX_DEV"],
-  },
-  {
-    assetType: "Multitenant",
-    sbcName: "dev-ce-lnd-zoom01",
-    serviceType: "Zoom Phone",
-    ipGroupNames: ["GUCX_DEV"],
-  },
-  {
-    assetType: "Multitenant",
-    sbcName: "DEV-CE-IRL-ACS01",
-    serviceType: "ACS",
-    ipGroupNames: ["SIPP UAS"],
-  },
-  {
-    assetType: "Multitenant",
-    sbcName: "DEV-CE-LND-ACS01",
-    serviceType: "ACS",
-    ipGroupNames: ["SIPP UAS"],
-  },
-];
 
 const dedicatedAssets = [
   {
