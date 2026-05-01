@@ -1,10 +1,9 @@
-import app from "./app.mjs";
 import { getSecret } from "./utils/v1/awsSdk.mjs";
 
-(async () => {
+await (async () => {
   const { statusCode, data } = await getSecret(
     process.env.AWS_SM_APP_SECRET,
-    process.env.AWS_SM_CONF_REGION
+    process.env.AWS_SM_CONF_REGION,
   );
   // If unable to fetch configuration data for the from AWS SM, console log the error
   if (statusCode !== 200) {
@@ -22,6 +21,8 @@ import { getSecret } from "./utils/v1/awsSdk.mjs";
     console.log("INFO: Config data from AWS SM added to environmental variables");
   }
 })();
+
+const { default: app } = await import("./app.mjs");
 
 process.on("uncaughtException", (err) => {
   console.log("UNCAUGHT EXCEPTION! Shutting down...");

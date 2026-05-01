@@ -1,3 +1,5 @@
+import { fetchCustomerAssets, getMTassets, getDedicatedAssets } from "../../utils/v1/dbAPI.mjs";
+
 import util from "node:util";
 import { randomBytes as randomBytesCb, randomUUID } from "node:crypto";
 
@@ -7,6 +9,183 @@ import AppError from "../../utils/v1/appError.mjs";
 import { object, string, array, number } from "yup";
 
 import { postKpisToPipeline } from "../../utils/v1/dataPrepper.mjs";
+
+export const generateKpiDataAuto = catchAsync(async (req, res, next) => {
+  let { dateFrom, dateTo, customerUuid } = req.body;
+  if (dateFrom === undefined || dateTo === undefined || !customerUuid) {
+    return next(new AppError("Missing dateFrom, dateTo, or customerUuid", 400));
+  }
+
+  // Ensure values are numbers, not strings
+  if (typeof dateFrom === "string") dateFrom = Number(dateFrom);
+  if (typeof dateTo === "string") dateTo = Number(dateTo);
+  if (Number.isNaN(dateFrom) || Number.isNaN(dateTo)) {
+    return next(new AppError("dateFrom and dateTo must be valid numbers", 400));
+  }
+
+  // Support both seconds and milliseconds input (auto-detect)
+  // If value is less than year 2002 in ms, treat as seconds
+  if (dateFrom < 1000000000000) dateFrom = dateFrom * 1000;
+  if (dateTo < 1000000000000) dateTo = dateTo * 1000;
+
+  // Validate range: max 1 month (31 days)
+  const maxRangeMs = 31 * 24 * 60 * 60 * 1000;
+  if (dateTo < dateFrom) {
+    return next(new AppError("dateTo must be after dateFrom", 400));
+  }
+  if (dateTo - dateFrom > maxRangeMs) {
+    return next(new AppError("Time range cannot exceed 31 days", 400));
+  }
+
+  // Fetch all MT and Dedicated assets for the customer
+  const mtAssets = await getMTassets(customerUuid);
+  if (mtAssets instanceof Error) {
+    return next(
+      new AppError(`Error fetching Multitenant assets from database: ${mtAssets.message}`, 500),
+    );
+  }
+  const dedicatedAssets = await getDedicatedAssets(customerUuid);
+  if (dedicatedAssets instanceof Error) {
+    return next(
+      new AppError(
+        `Error fetching Dedicated assets from database: ${dedicatedAssets.message}`,
+        500,
+      ),
+    );
+  }
+
+  // Merge and clean assets
+  let assets = [...mtAssets, ...dedicatedAssets]
+    .map((asset) => ({
+      ...asset,
+      ipGroupNames: Array.isArray(asset.ipGroupNames)
+        ? asset.ipGroupNames.filter((ipg) => ipg != null)
+        : [],
+    }))
+    .filter((asset) => asset.ipGroupNames.length > 0);
+
+  if (!assets || assets.length === 0) {
+    return next(new AppError("No assets found for customer", 404));
+  }
+
+  // Assign random quality to each asset
+  const qualities = ["poor", "medium", "good"];
+  assets = assets.map((asset) => ({
+    ...asset,
+    quality: qualities[Math.floor(Math.random() * qualities.length)],
+  }));
+
+  // Calculate number of intervals (no array allocation)
+  const timeIncrementsMs = 900000;
+  // Use BigInt for safe calculation
+  const dateFromBig = BigInt(dateFrom);
+  const dateToBig = BigInt(dateTo);
+  const timeIncrementsMsBig = BigInt(timeIncrementsMs);
+  const intervalCount = Number((dateToBig - dateFromBig) / timeIncrementsMsBig) + 1;
+  if (intervalCount > 5000) {
+    return next(
+      new AppError(
+        `Too many intervals requested (${intervalCount}). Reduce time range or increase interval size.`,
+        400,
+      ),
+    );
+  }
+
+  // Use the same random generators as generateKpiData
+  const randomInteger = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
+  const randomDecimalInteger = (min, max, decimalPlaces) =>
+    (Math.random() * (max - min) + min).toFixed(decimalPlaces) * 1;
+
+  // Efficiently loop over intervals without allocating a large array
+  for (let i = 0; i < intervalCount; i++) {
+    // Use BigInt to avoid overflow, then convert back to Number
+    const _interval = Number(dateFromBig + BigInt(i) * timeIncrementsMsBig);
+
+    const hour = new Date(_interval).getUTCHours();
+
+    if (hour >= 8 && hour <= 17) {
+      await Promise.all(
+        assets.map(async (_asset) => {
+          try {
+            const body = {
+              sbcName: _asset.sbcName,
+              cycleTimestamp: _interval,
+              kpiType: "historical",
+              assetType: _asset.assetType,
+              ...(_asset.assetType === "Multitenant" && { serviceType: _asset.serviceType }),
+              sbcKpis: _asset.ipGroupNames.map((_ipg) => {
+                return {
+                  ipGroupName: _ipg,
+                  mediaJitterInAvg:
+                    _asset.quality === "poor"
+                      ? randomDecimalInteger(50, 100, 1)
+                      : _asset.quality === "medium"
+                        ? randomDecimalInteger(30, 50, 1)
+                        : randomDecimalInteger(0, 3, 1),
+                  mediaJitterOutAvg:
+                    _asset.quality === "poor"
+                      ? randomDecimalInteger(50, 100, 1)
+                      : _asset.quality === "medium"
+                        ? randomDecimalInteger(30, 50, 1)
+                        : randomDecimalInteger(0, 3, 1),
+                  mediaMOSInAvg:
+                    _asset.quality === "poor"
+                      ? randomInteger(10, 29)
+                      : _asset.quality === "medium"
+                        ? randomInteger(30, 39)
+                        : randomDecimalInteger(40, 42),
+                  mediaMOSOutAvg:
+                    _asset.quality === "poor"
+                      ? randomInteger(10, 29)
+                      : _asset.quality === "medium"
+                        ? randomInteger(30, 39)
+                        : randomDecimalInteger(40, 42),
+                  mediaPacketLossInAvg:
+                    _asset.quality === "poor"
+                      ? randomDecimalInteger(6.6, 10, 1)
+                      : _asset.quality === "medium"
+                        ? randomDecimalInteger(2.7, 6.6, 1)
+                        : randomDecimalInteger(0, 2.7, 1),
+                  mediaPacketLossOutAvg:
+                    _asset.quality === "poor"
+                      ? randomDecimalInteger(6.6, 10, 1)
+                      : _asset.quality === "medium"
+                        ? randomDecimalInteger(2.7, 6.6, 1)
+                        : randomDecimalInteger(0, 2.7, 1),
+                  minutesOfUsage: randomInteger(25, 45),
+                  averageCallDurationAvg: randomInteger(40, 360),
+                };
+              }),
+            };
+            console.log(
+              `Processing asset ${_asset.sbcName} for interval ${new Date(_interval).toISOString()}`,
+            );
+
+            const postToPipelineOutcome = await postKpisToPipeline(
+              process.env.dataPrepperAuth,
+              body,
+              "kpi",
+            );
+
+            if (postToPipelineOutcome.statusCode !== 200) {
+              console.log(
+                `ERROR: Processing asset ${_asset.sbcName}. ERR - ${postToPipelineOutcome.body}`,
+              );
+            }
+          } catch (error) {
+            console.log(error);
+          }
+        }),
+      );
+    } else {
+      console.log(
+        `Skipping interval ${new Date(_interval).toISOString()} due to off-peak hour (${hour}h)`,
+      );
+    }
+  }
+
+  res.status(200).send({ status: "success", data: "KPI data submitted for all assets." });
+});
 
 export const generateKpiData = catchAsync(async (req, res, next) => {
   // Random number generation functions
@@ -38,7 +217,7 @@ export const generateKpiData = catchAsync(async (req, res, next) => {
       }),
       ipGroupNames: array().required(),
       quality: string().required(),
-    })
+    }),
   ).min(1, "Expected at lease 1 asset to be supplied in the request");
 
   try {
@@ -48,8 +227,8 @@ export const generateKpiData = catchAsync(async (req, res, next) => {
       new AppError(
         `ERROR: Supplied body has incorrect format: ERR - ${err.errors}`,
         500,
-        `ERROR: Supplied body has incorrect format: ERR - ${err.errors}`
-      )
+        `ERROR: Supplied body has incorrect format: ERR - ${err.errors}`,
+      ),
     );
   }
 
@@ -95,42 +274,42 @@ export const generateKpiData = catchAsync(async (req, res, next) => {
                   _asset.quality === "poor"
                     ? randomDecimalInteger(50, 100, 1)
                     : _asset.quality === "medium"
-                    ? randomDecimalInteger(30, 50, 1)
-                    : randomDecimalInteger(0, 3, 1),
+                      ? randomDecimalInteger(30, 50, 1)
+                      : randomDecimalInteger(0, 3, 1),
                 mediaJitterOutAvg:
                   _asset.quality === "poor"
                     ? randomDecimalInteger(50, 100, 1)
                     : _asset.quality === "medium"
-                    ? randomDecimalInteger(30, 50, 1)
-                    : randomDecimalInteger(0, 3, 1),
+                      ? randomDecimalInteger(30, 50, 1)
+                      : randomDecimalInteger(0, 3, 1),
 
                 mediaMOSInAvg:
                   _asset.quality === "poor"
                     ? randomInteger(10, 29)
                     : _asset.quality === "medium"
-                    ? randomInteger(30, 39)
-                    : randomDecimalInteger(40, 42),
+                      ? randomInteger(30, 39)
+                      : randomDecimalInteger(40, 42),
 
                 mediaMOSOutAvg:
                   _asset.quality === "poor"
                     ? randomInteger(10, 29)
                     : _asset.quality === "medium"
-                    ? randomInteger(30, 39)
-                    : randomDecimalInteger(40, 42),
+                      ? randomInteger(30, 39)
+                      : randomDecimalInteger(40, 42),
 
                 mediaPacketLossInAvg:
                   _asset.quality === "poor"
                     ? randomDecimalInteger(6.6, 10, 1)
                     : _asset.quality === "medium"
-                    ? randomDecimalInteger(2.7, 6.6, 1)
-                    : randomDecimalInteger(0, 2.7, 1),
+                      ? randomDecimalInteger(2.7, 6.6, 1)
+                      : randomDecimalInteger(0, 2.7, 1),
 
                 mediaPacketLossOutAvg:
                   _asset.quality === "poor"
                     ? randomDecimalInteger(6.6, 10, 1)
                     : _asset.quality === "medium"
-                    ? randomDecimalInteger(2.7, 6.6, 1)
-                    : randomDecimalInteger(0, 2.7, 1),
+                      ? randomDecimalInteger(2.7, 6.6, 1)
+                      : randomDecimalInteger(0, 2.7, 1),
 
                 minutesOfUsage: randomInteger(25, 45),
 
@@ -142,18 +321,18 @@ export const generateKpiData = catchAsync(async (req, res, next) => {
           const postToPipelineOutcome = await postKpisToPipeline(
             process.env.dataPrepperAuth,
             body,
-            "kpi"
+            "kpi",
           );
 
           if (postToPipelineOutcome.statusCode !== 200) {
             console.log(
-              `ERROR: Processing asset ${_asset.serviceType}. ERR - ${postToPipelineOutcome.body}`
+              `ERROR: Processing asset ${_asset.serviceType}. ERR - ${postToPipelineOutcome.body}`,
             );
           }
         } catch (error) {
           console.log(error);
         }
-      })
+      }),
     );
   }
 
@@ -177,7 +356,7 @@ export const generateCdrData = catchAsync(async (req, res, next) => {
         ipGroup: string().required(),
         numberRangeFrom: number().required(),
         numberRangeTo: number().required(),
-      })
+      }),
     )
       .min(1)
       .required()
@@ -196,8 +375,8 @@ export const generateCdrData = catchAsync(async (req, res, next) => {
       new AppError(
         `ERROR: Supplied body has incorrect format: ERR - ${err.errors}`,
         500,
-        `ERROR: Supplied body has incorrect format: ERR - ${err.errors}`
-      )
+        `ERROR: Supplied body has incorrect format: ERR - ${err.errors}`,
+      ),
     );
   }
 
@@ -251,13 +430,13 @@ export const generateCdrData = catchAsync(async (req, res, next) => {
         directionBaseData.egressIpGroupName = data.services[dstServiceIndex].ipGroup;
         directionBaseData.callingUserBeforeManipulation = `+${randomInteger(
           data.pstn.numberRangeFrom,
-          data.pstn.numberRangeTo
+          data.pstn.numberRangeTo,
         )}`;
         directionBaseData.callingUserAfterManipulation =
           directionBaseData.callingUserBeforeManipulation;
         directionBaseData.calledUserBeforeManipulation = `+${randomInteger(
           data.services[dstServiceIndex].numberRangeFrom,
-          data.services[dstServiceIndex].numberRangeTo
+          data.services[dstServiceIndex].numberRangeTo,
         )}`;
         directionBaseData.calledUserAfterManipulation =
           directionBaseData.calledUserBeforeManipulation;
@@ -271,7 +450,7 @@ export const generateCdrData = catchAsync(async (req, res, next) => {
           "en-GB",
           {
             weekday: "short",
-          }
+          },
         )} ${callConnectObj.toLocaleDateString("en-GB", {
           month: "short",
         })} ${callConnectObj.toLocaleDateString("en-GB", {
@@ -283,7 +462,7 @@ export const generateCdrData = catchAsync(async (req, res, next) => {
           "en-GB",
           {
             weekday: "short",
-          }
+          },
         )} ${callConnectObj.toLocaleDateString("en-GB", {
           month: "short",
         })} ${callConnectObj.toLocaleDateString("en-GB", {
@@ -295,7 +474,7 @@ export const generateCdrData = catchAsync(async (req, res, next) => {
           "en-GB",
           {
             weekday: "short",
-          }
+          },
         )} ${callReleaseObj.toLocaleDateString("en-GB", {
           month: "short",
         })} ${callReleaseObj.toLocaleDateString("en-GB", {
@@ -315,13 +494,13 @@ export const generateCdrData = catchAsync(async (req, res, next) => {
 
         directionBaseData.callingUserBeforeManipulation = `+${randomInteger(
           data.services[srcServiceIndex].numberRangeFrom,
-          data.services[srcServiceIndex].numberRangeTo
+          data.services[srcServiceIndex].numberRangeTo,
         )}`;
         directionBaseData.callingUserAfterManipulation =
           directionBaseData.callingUserBeforeManipulation;
         directionBaseData.calledUserBeforeManipulation = `+${randomInteger(
           data.pstn.numberRangeFrom,
-          data.pstn.numberRangeTo
+          data.pstn.numberRangeTo,
         )}`;
         directionBaseData.calledUserAfterManipulation =
           directionBaseData.calledUserBeforeManipulation;
@@ -335,7 +514,7 @@ export const generateCdrData = catchAsync(async (req, res, next) => {
           "en-GB",
           {
             weekday: "short",
-          }
+          },
         )} ${callConnectObj.toLocaleDateString("en-GB", {
           month: "short",
         })} ${callConnectObj.toLocaleDateString("en-GB", {
@@ -347,7 +526,7 @@ export const generateCdrData = catchAsync(async (req, res, next) => {
           "en-GB",
           {
             weekday: "short",
-          }
+          },
         )} ${callConnectObj.toLocaleDateString("en-GB", {
           month: "short",
         })} ${callConnectObj.toLocaleDateString("en-GB", {
@@ -359,7 +538,7 @@ export const generateCdrData = catchAsync(async (req, res, next) => {
           "en-GB",
           {
             weekday: "short",
-          }
+          },
         )} ${callReleaseObj.toLocaleDateString("en-GB", {
           month: "short",
         })} ${callReleaseObj.toLocaleDateString("en-GB", {
@@ -479,7 +658,7 @@ export const generateCdrData = catchAsync(async (req, res, next) => {
     todayStart: new Date(new Date().setUTCHours(9, 0, 0, 0)).getTime(),
     todayEnd: new Date(new Date().setUTCHours(17, 0, 0, 0)).getTime(),
   };
-
+  console.log(range);
   /*
     Setting intervals every 15 minutes and generating timestamps for each interval in milliscends
     We wil use these timestamps as value when submitting data to OpenSearch
@@ -509,14 +688,14 @@ export const generateCdrData = catchAsync(async (req, res, next) => {
         const postToPipelineOutcome = await postKpisToPipeline(
           process.env.dataPrepperAuth,
           body,
-          "sbcCdr"
+          "sbcCdr",
         );
 
         if (postToPipelineOutcome.statusCode !== 200) {
           console.log(
             `ERROR: Failed to poast cdr records to pipeline- ERR: ${JSON.stringify(
-              postToPipelineOutcome.body
-            )}`
+              postToPipelineOutcome.body,
+            )}`,
           );
         }
       } catch (error) {
