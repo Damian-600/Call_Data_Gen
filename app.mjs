@@ -24,10 +24,10 @@ app.use(
   helmet({
     frameguard: { action: "deny" },
     contentSecurityPolicy: {
-      directives: { defaultSrc: ["'none'"], styleSrc: ["'self"] },
+      directives: { defaultSrc: ["'none'"], styleSrc: ["'self'"] },
     },
     crossOriginEmbedderPolicy: true,
-  })
+  }),
 );
 
 app.use(express.json());
@@ -39,7 +39,7 @@ app.use(cloudWatchLogger);
 app.use("/api/", (req, res, next) => {
   const contentType = req.headers["content-type"];
   if (contentType && !(req.is("application/json") || req.is("multipart/form-data"))) {
-    next(new AppError(`Request media type is not supported`, 415));
+    return next(new AppError(`Request media type is not supported`, 415));
   }
   next();
 });

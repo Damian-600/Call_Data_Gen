@@ -22,13 +22,13 @@ await (async () => {
   }
 })();
 
-const { default: app } = await import("./app.mjs");
-
 process.on("uncaughtException", (err) => {
   console.log("UNCAUGHT EXCEPTION! Shutting down...");
   console.log(err.name, err.message, err.stack);
   process.exit(1);
 });
+
+const { default: app } = await import("./app.mjs");
 
 console.log(`ENV:  ${process.env.NODE_ENV}`);
 

@@ -454,7 +454,7 @@ export const generateCdrDataAuto = catchAsync(async (req, res, next) => {
       setupTime: formatTime(callStartMs),
       globalSessionId,
       sessionId: sharedPstnSessionId,
-      isSuccess: "yes",
+      isSuccess: isSuccess ? "yes" : "no",
       connectTimeUTC: "",
       releaseTimeUTC: formatTime(callStartMs + randomInt(50, 200)),
       timeToConnect: 0,
@@ -489,7 +489,7 @@ export const generateCdrDataAuto = catchAsync(async (req, res, next) => {
       egressService: "",
       ingressUser: "",
       ingressService: "",
-      pstnClientTag: isSuccess ? serviceAsset.ipGroupName : "",
+      pstnClientTag: serviceAsset.ipGroupName,
     };
 
     if (!isSuccess) return [pstnAttempt]; // failed call: single ATTEMPT record only
@@ -824,55 +824,86 @@ export const generateCdrDataAuto = catchAsync(async (req, res, next) => {
   let totalSubmitted = 0;
   let errors = 0;
 
-  const submitCdr = async (cdr) => {
-    const outcome = await postKpisToPipeline(process.env.dataPrepperAuth, cdr, "sbcCdr");
-    if (outcome.statusCode !== 200) {
-      errors++;
-      console.log(`CDR pipeline error: ${JSON.stringify(outcome.body)}`);
-    } else {
-      totalSubmitted++;
-    }
-  };
-
   while (currentInterval <= dateTo) {
-    for (const serviceAsset of mtAssets) {
-      // ── success: cycle Service→PSTN / PSTN→Service / Service→Service ────────
-      for (let i = 0; i < successRecordsPerInterval; i++) {
-        try {
-          let cdrs;
-          switch (i % 3) {
-            case 0:
-              cdrs = await genServiceToPstnCdrs(serviceAsset, currentInterval);
-              break;
-            case 1:
-              cdrs = await genPstnToServiceCdrs(serviceAsset, currentInterval, true);
-              break;
-            default: {
-              const otherAssets = mtAssets.filter((a) => a !== serviceAsset);
-              const dstAsset =
-                otherAssets.length > 0 ? otherAssets[randomInt(0, otherAssets.length - 1)] : null;
-              cdrs = dstAsset
-                ? await genServiceToServiceCdrs(serviceAsset, dstAsset, currentInterval)
-                : await genServiceToPstnCdrs(serviceAsset, currentInterval);
-            }
-          }
-          for (const cdr of cdrs) await submitCdr(cdr);
-        } catch (err) {
-          errors++;
-          console.log(`Error generating success CDR: ${err.message}`);
-        }
-      }
+    const intervalHour = new Date(currentInterval).getUTCHours();
+    if (intervalHour < 8 || intervalHour >= 18) {
+      currentInterval += timeIncrementsMs;
+      console.log(
+        `Skipping interval starting at ${new Date(currentInterval).toISOString()} (outside business hours)`,
+      );
+      continue;
+    }
+    const intervalLabel = new Date(currentInterval).toISOString();
+    console.log(`Generating CDRs for interval starting at ${intervalLabel}`);
 
-      // ── failure: PSTN→Service with 404 termination (single ATTEMPT record) ──
-      for (let i = 0; i < failedRecordsPerInterval; i++) {
-        try {
-          const cdrs = await genPstnToServiceCdrs(serviceAsset, currentInterval, false);
-          for (const cdr of cdrs) await submitCdr(cdr);
-        } catch (err) {
-          errors++;
-          console.log(`Error generating failed CDR: ${err.message}`);
+    // ── Process all assets in parallel for this interval ──────────────────────
+    const intervalResults = await Promise.all(
+      mtAssets.map(async (serviceAsset) => {
+        let assetSubmitted = 0;
+        let assetErrors = 0;
+
+        // ── success: cycle Service→PSTN / PSTN→Service / Service→Service ──────
+        for (let i = 0; i < successRecordsPerInterval; i++) {
+          try {
+            let cdrs;
+            switch (i % 3) {
+              case 0:
+                cdrs = await genServiceToPstnCdrs(serviceAsset, currentInterval);
+                break;
+              case 1:
+                cdrs = await genPstnToServiceCdrs(serviceAsset, currentInterval, true);
+                break;
+              default: {
+                const otherAssets = mtAssets.filter((a) => a !== serviceAsset);
+                const dstAsset =
+                  otherAssets.length > 0 ? otherAssets[randomInt(0, otherAssets.length - 1)] : null;
+                cdrs = dstAsset
+                  ? await genServiceToServiceCdrs(serviceAsset, dstAsset, currentInterval)
+                  : await genServiceToPstnCdrs(serviceAsset, currentInterval);
+              }
+            }
+            for (const cdr of cdrs) {
+              const outcome = await postKpisToPipeline(process.env.dataPrepperAuth, cdr, "sbcCdr");
+              if (outcome.statusCode !== 200) {
+                assetErrors++;
+                console.log(`CDR pipeline error: ${JSON.stringify(outcome.body)}`);
+              } else {
+                assetSubmitted++;
+              }
+            }
+          } catch (err) {
+            assetErrors++;
+            console.log(`Error generating success CDR: ${err.message}`);
+          }
         }
-      }
+
+        // ── failure: PSTN→Service with 404 termination (single ATTEMPT record) ─
+        for (let i = 0; i < failedRecordsPerInterval; i++) {
+          try {
+            const cdrs = await genPstnToServiceCdrs(serviceAsset, currentInterval, false);
+            for (const cdr of cdrs) {
+              const outcome = await postKpisToPipeline(process.env.dataPrepperAuth, cdr, "sbcCdr");
+              if (outcome.statusCode !== 200) {
+                assetErrors++;
+                console.log(`CDR pipeline error: ${JSON.stringify(outcome.body)}`);
+              } else {
+                assetSubmitted++;
+              }
+            }
+          } catch (err) {
+            assetErrors++;
+            console.log(`Error generating failed CDR: ${err.message}`);
+          }
+        }
+
+        return { assetSubmitted, assetErrors };
+      }),
+    );
+
+    // ── Aggregate per-asset counters ──────────────────────────────────────────
+    for (const { assetSubmitted, assetErrors } of intervalResults) {
+      totalSubmitted += assetSubmitted;
+      errors += assetErrors;
     }
 
     currentInterval += timeIncrementsMs;
