@@ -1061,6 +1061,8 @@ export const generateKpiDataAuto = catchAsync(async (req, res, next) => {
                         : randomDecimalInteger(0, 2.7, 1),
                   minutesOfUsage: randomInteger(25, 45),
                   averageCallDurationAvg: randomInteger(40, 360),
+                  establishedCallsIn: randomInteger(0, 10000),
+                  establishedCallsOut: randomInteger(0, 10000),
                 };
               }),
             };

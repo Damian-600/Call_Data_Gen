@@ -9,7 +9,7 @@
     "dev": "nodemon --env-file=.env server.mjs"
   },
   "engines": {
-    "node": "22.14.0"
+    "node": ">=20"
   },
   "author": "CSE",
   "license": "ISC",
